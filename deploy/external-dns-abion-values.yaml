@@ -1,0 +1,21 @@
+provider:
+  name: webhook
+  webhook:
+    image:
+      repository: abiondevelopment/external-dns-webhook-abion
+      tag: latest
+    env:
+      # Abion webhook specific environment variables
+      - name: ABION_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: abion-credentials
+            key: api-key
+      - name: SERVER_HOST
+        value: 0.0.0.0
+#      - name: ABION_DEBUG
+#        value: "true"
+
+#logLevel: debug
+#txtOwnerId: <replace with own id>
+policy: sync

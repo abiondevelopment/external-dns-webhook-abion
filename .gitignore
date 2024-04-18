@@ -1,0 +1,8 @@
+# Build directories
+build/
+token
+.idea/
+cover.out
+reports/
+dist/
+*.iml
