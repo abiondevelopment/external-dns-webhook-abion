@@ -49,7 +49,7 @@ test:
 
 .PHONY: build
 build:
-    docker build -t "$(IMAGE_NAME):latest" -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
+	docker build -t "$(IMAGE_NAME):latest" -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
 
 .PHONY: push
 push:
