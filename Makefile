@@ -54,15 +54,3 @@ build:
 .PHONY: push
 push:
 	docker push "$(IMAGE_NAME):$(IMAGE_TAG)"
-
-.PHONY: rendered-manifest.yaml
-rendered-manifest.yaml: $(OUT)/rendered-manifest.yaml
-
-$(OUT)/rendered-manifest.yaml: $(HELM_FILES) | $(OUT)
-	helm template \
-	    --name external-dns-webhook-abion \
-            --set image.repository=$(IMAGE_NAME) \
-            --set image.tag=$(IMAGE_TAG) \
-            deploy/external-dns-webhook-abion > $@
-
-
