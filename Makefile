@@ -4,7 +4,7 @@ ARCH ?= $(shell $(GO) env GOARCH)
 
 ARTIFACT_NAME := external-dns-webhook-abion
 IMAGE_NAME := "abiondevelopment/external-dns-webhook-abion"
-IMAGE_TAG := "latest"
+IMAGE_TAG := "1.0.0"
 
 OUT := $(shell pwd)/_out
 
@@ -49,7 +49,11 @@ test:
 
 .PHONY: build
 build:
-	docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
+    docker build -t "$(IMAGE_NAME):latest" -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
+
+.PHONY: push
+push:
+	docker push "$(IMAGE_NAME):$(IMAGE_TAG)"
 
 .PHONY: rendered-manifest.yaml
 rendered-manifest.yaml: $(OUT)/rendered-manifest.yaml
