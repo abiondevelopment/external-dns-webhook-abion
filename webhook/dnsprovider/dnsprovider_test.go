@@ -481,7 +481,7 @@ func Test_processCreateActions(t *testing.T) {
 	}
 
 	run := func(t *testing.T, tc testCase) {
-		err := tc.provider.processCreateActions(tc.createsByDomain)
+		err := tc.provider.processCreateActions(context.Background(), tc.createsByDomain)
 		checkError(t, err, tc.expected.err)
 	}
 
@@ -522,6 +522,27 @@ func Test_processCreateActions(t *testing.T) {
 						APIResponse: nil,
 						err:         nil,
 					},
+					getZone: zoneResponse{
+						APIResponse: &internal.APIResponse[*internal.Zone]{
+							Data: &internal.Zone{
+								Type: "zone",
+								ID:   "abion.test",
+								Attributes: internal.Attributes{
+									Records: map[string]map[string][]internal.Record{
+										"@": {
+											"TXT": {
+												{
+													TTL:  3600,
+													Data: "Existing TXT data",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+						err: nil,
+					},
 				},
 			},
 			expected: struct {
@@ -550,6 +571,27 @@ func Test_processCreateActions(t *testing.T) {
 							Message: "Service Unavailable",
 						},
 					},
+					getZone: zoneResponse{
+						APIResponse: &internal.APIResponse[*internal.Zone]{
+							Data: &internal.Zone{
+								Type: "zone",
+								ID:   "abion.test",
+								Attributes: internal.Attributes{
+									Records: map[string]map[string][]internal.Record{
+										"@": {
+											"TXT": {
+												{
+													TTL:  3600,
+													Data: "Existing TXT data",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+						err: nil,
+					},
 				},
 			},
 			expected: struct {
@@ -569,16 +611,17 @@ func Test_processCreateActions(t *testing.T) {
 
 func Test_processUpdateActions(t *testing.T) {
 	type testCase struct {
-		name            string
-		updatesByDomain map[string][]*endpoint.Endpoint
-		provider        AbionProvider
-		expected        struct {
+		name               string
+		updatesByDomain    map[string][]*endpoint.Endpoint
+		updatesByDomainOld map[string][]*endpoint.Endpoint
+		provider           AbionProvider
+		expected           struct {
 			err bool
 		}
 	}
 
 	run := func(t *testing.T, tc testCase) {
-		err := tc.provider.processUpdateActions(tc.updatesByDomain)
+		err := tc.provider.processUpdateActions(context.Background(), tc.updatesByDomain, tc.updatesByDomainOld)
 		checkError(t, err, tc.expected.err)
 	}
 
@@ -603,6 +646,7 @@ func Test_processUpdateActions(t *testing.T) {
 					},
 				},
 			},
+			updatesByDomainOld: map[string][]*endpoint.Endpoint{},
 			provider: AbionProvider{
 				Client: &mockClient{
 					getZone: zoneResponse{
@@ -630,6 +674,7 @@ func Test_processUpdateActions(t *testing.T) {
 					},
 				},
 			},
+			updatesByDomainOld: map[string][]*endpoint.Endpoint{},
 			provider: AbionProvider{
 				Client: &mockClient{
 					getZone: zoneResponse{
@@ -681,6 +726,7 @@ func Test_processUpdateActions(t *testing.T) {
 					},
 				},
 			},
+			updatesByDomainOld: map[string][]*endpoint.Endpoint{},
 			provider: AbionProvider{
 				Client: &mockClient{
 					getZone: zoneResponse{

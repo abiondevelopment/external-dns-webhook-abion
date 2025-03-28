@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/abiondevelopment/external-dns-webhook-abion/webhook/dnsprovider"
 
 	"github.com/abiondevelopment/external-dns-webhook-abion/webhook"

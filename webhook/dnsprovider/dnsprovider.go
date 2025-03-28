@@ -101,14 +101,15 @@ func (p *AbionProvider) ApplyChanges(ctx context.Context, changes *plan.Changes)
 	}
 
 	createsByDomain := p.endpointsByZone(zoneNameIDMapper, changes.Create)
-	updatesByDomain := p.endpointsByZone(zoneNameIDMapper, changes.UpdateNew)
+	updatesByDomainNew := p.endpointsByZone(zoneNameIDMapper, changes.UpdateNew)
+	updatesByDomainOld := p.endpointsByZone(zoneNameIDMapper, changes.UpdateOld)
 	deletesByDomain := p.endpointsByZone(zoneNameIDMapper, changes.Delete)
 
-	if err := p.processCreateActions(createsByDomain); err != nil {
+	if err := p.processCreateActions(ctx, createsByDomain); err != nil {
 		return err
 	}
 
-	if err := p.processUpdateActions(updatesByDomain); err != nil {
+	if err := p.processUpdateActions(ctx, updatesByDomainNew, updatesByDomainOld); err != nil {
 		return err
 	}
 
@@ -147,8 +148,13 @@ func (p *AbionProvider) populateZoneIdMapper(ctx context.Context) (provider.Zone
 	return zoneNameIDMapper, nil
 }
 
-func (p *AbionProvider) processCreateActions(createsByDomain map[string][]*endpoint.Endpoint) error {
+func (p *AbionProvider) processCreateActions(ctx context.Context, createsByDomain map[string][]*endpoint.Endpoint) error {
 	for zoneId, createEndpoints := range createsByDomain {
+
+		zone, err := p.Client.GetZone(ctx, zoneId)
+		if err != nil {
+			return err
+		}
 
 		records := make(map[string]map[string][]internal.Record)
 
@@ -168,6 +174,25 @@ func (p *AbionProvider) processCreateActions(createsByDomain map[string][]*endpo
 			if records[dnsName] == nil {
 				records[dnsName] = make(map[string][]internal.Record)
 			}
+
+			// add all existing records to make sure to not clear the other zone records on same name level and of same record type
+			log.WithFields(
+				log.Fields{
+					"dnsName": dnsName,
+				}).Debug("Checking existing zone records on name level")
+			existingRecordsByDNSName, ok := zone.Data.Attributes.Records[dnsName]
+			if ok {
+				log.WithFields(
+					log.Fields{
+						"dnsName":    dnsName,
+						"recordType": createEndpoint.RecordType,
+					}).Debug("Checking existing zone records of same record type on same dns name level")
+				existingRecordsOfSameRecordType, ok := existingRecordsByDNSName[createEndpoint.RecordType]
+				if ok {
+					data = append(data, existingRecordsOfSameRecordType...)
+				}
+			}
+
 			records[dnsName][createEndpoint.RecordType] = data
 		}
 
@@ -179,7 +204,7 @@ func (p *AbionProvider) processCreateActions(createsByDomain map[string][]*endpo
 			continue
 		}
 
-		err := p.submitPatchZone(zoneId, records)
+		err = p.submitPatchZone(zoneId, records)
 		if err != nil {
 			return err
 		}
@@ -187,10 +212,10 @@ func (p *AbionProvider) processCreateActions(createsByDomain map[string][]*endpo
 	return nil
 }
 
-func (p *AbionProvider) processUpdateActions(updatesByDomain map[string][]*endpoint.Endpoint) error {
-	for zoneId, updateEndpoints := range updatesByDomain {
+func (p *AbionProvider) processUpdateActions(ctx context.Context, updatesByDomainNew map[string][]*endpoint.Endpoint, updatesByDomainOld map[string][]*endpoint.Endpoint) error {
+	for zoneId, updateEndpointsNew := range updatesByDomainNew {
 
-		currentZone, err := p.Client.GetZone(context.Background(), zoneId)
+		currentZone, err := p.Client.GetZone(ctx, zoneId)
 		if err != nil {
 			log.Warnf("unable to get zone: %s, error: %v", zoneId, err)
 			continue
@@ -198,21 +223,53 @@ func (p *AbionProvider) processUpdateActions(updatesByDomain map[string][]*endpo
 
 		records := make(map[string]map[string][]internal.Record)
 
-		for _, updateEndpoint := range updateEndpoints {
+		for _, updateEndpointNew := range updateEndpointsNew {
 
-			dnsName := p.getAbionDnsName(updateEndpoint.DNSName, zoneId)
+			dnsName := p.getAbionDnsName(updateEndpointNew.DNSName, zoneId)
 
 			var data []internal.Record
 			currentSubDomain, subdomainExist := currentZone.Data.Attributes.Records[dnsName] // subdomain www or @ if root
 			if subdomainExist {
-				_, recordsExist := currentSubDomain[updateEndpoint.RecordType]
+				currentRecords, recordsExist := currentSubDomain[updateEndpointNew.RecordType] // current records of type TXT, A, etc., on same dns name/subdomain (@, www, etc)
 				if recordsExist {
-					for _, target := range updateEndpoint.Targets {
-						target = p.formatTarget(updateEndpoint, target)
-
+					for _, target := range updateEndpointNew.Targets {
+						// always add the updated (new) changes from external-dns
+						target = p.formatTarget(updateEndpointNew, target)
+						log.WithFields(
+							log.Fields{
+								"recordType": updateEndpointNew.RecordType,
+								"target":     target,
+							}).Debug("Adding updated (new) zone record")
 						var record internal.Record
-						record = p.createRecord(updateEndpoint, record, target)
+						record = p.createRecord(updateEndpointNew, record, target)
 						data = append(data, record)
+					}
+					for _, currentRecord := range currentRecords {
+						// need to add all the current records which are not included in update (old) changes
+						addRecord := true
+						for _, updateEndpointsOld := range updatesByDomainOld {
+							for _, updateEndpointOld := range updateEndpointsOld {
+								if updateEndpointOld.RecordType == updateEndpointNew.RecordType { // make sure compare same record type
+									for _, oldTarget := range updateEndpointOld.Targets {
+										oldTarget = p.formatTarget(updateEndpointOld, oldTarget)
+										if currentRecord.Data == oldTarget { // if any old target matches with current record data, it means it has already been added by the updated (new) changes from external-dns.
+											log.WithFields(
+												log.Fields{
+													"currentRecord": currentRecord,
+												}).Debug("Don't add this record as an updated version has already been added by the updated (new) changes from external-dns")
+											addRecord = false
+										}
+									}
+								}
+							}
+						}
+						if addRecord {
+							log.WithFields(
+								log.Fields{
+									"currentRecord": currentRecord,
+								}).Debug("Adding current zone record")
+							data = append(data, currentRecord)
+						}
 					}
 				}
 			}
@@ -220,7 +277,7 @@ func (p *AbionProvider) processUpdateActions(updatesByDomain map[string][]*endpo
 			if records[dnsName] == nil {
 				records[dnsName] = make(map[string][]internal.Record)
 			}
-			records[dnsName][updateEndpoint.RecordType] = data
+			records[dnsName][updateEndpointNew.RecordType] = data
 		}
 
 		log.WithFields(log.Fields{

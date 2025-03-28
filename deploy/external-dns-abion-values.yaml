@@ -3,7 +3,7 @@ provider:
   webhook:
     image:
       repository: abiondevelopment/external-dns-webhook-abion
-      tag: latest
+      tag: 1.0.1
     env:
       # Abion webhook specific environment variables
       - name: ABION_API_KEY
