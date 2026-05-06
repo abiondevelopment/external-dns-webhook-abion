@@ -10,6 +10,7 @@ import (
 // Configuration struct for configuration environment variables
 type Configuration struct {
 	ApiKey             string        `env:"ABION_API_KEY"`
+	DomainFilter       []string      `env:"DOMAIN_FILTER" envSeparator:","`
 	Debug              bool          `env:"ABION_DEBUG" default:"false"`
 	LogFormat          string        `env:"LOG_FORMAT" default:"text"`
 	DryRun             bool          `env:"DRY_RUN" default:"false"`

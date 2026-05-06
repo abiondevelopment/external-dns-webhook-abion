@@ -16,24 +16,71 @@ import (
 
 type AbionProvider struct {
 	provider.BaseProvider
-	Client internal.ApiClient
-	DryRun bool
+	Client       internal.ApiClient
+	DryRun       bool
+	domainFilter endpoint.DomainFilter
+	zoneFilter   []string
 }
 
 func NewAbionProvider(config *configuration.Configuration) (*AbionProvider, error) {
 	client := *internal.NewAbionClient(config.ApiKey)
 	p := &AbionProvider{
-		Client: &client,
-		DryRun: config.DryRun,
+		Client:       &client,
+		DryRun:       config.DryRun,
+		domainFilter: endpoint.NewDomainFilter(config.DomainFilter),
+		zoneFilter:   config.DomainFilter,
 	}
 
 	return p, nil
 }
 
-// Records returns the list of records for all zones your session can access
+func (p *AbionProvider) GetDomainFilter() endpoint.DomainFilter {
+	return p.domainFilter
+}
+
+// Records returns the list of records for zones matching the domain filter.
+// If no domain filter is configured, all accessible zones are returned.
 func (p *AbionProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, error) {
 	var endpoints []*endpoint.Endpoint
 
+	zoneIDs, err := p.getFilteredZoneIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, zoneID := range zoneIDs {
+		zone, err := p.Client.GetZone(ctx, zoneID)
+		if err != nil {
+			return nil, err
+		}
+
+		for dnsName, record := range zone.Data.Attributes.Records {
+			for recordType, recordDetails := range record {
+				for _, recordDetail := range recordDetails {
+					ep := endpoint.NewEndpointWithTTL(p.getExternalDnsDnsName(dnsName, zoneID), recordType, endpoint.TTL(recordDetail.TTL), recordDetail.Data)
+					endpoints = append(endpoints, ep)
+				}
+			}
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"endpoints": endpoints,
+	}).Debug("Records")
+
+	return endpoints, nil
+}
+
+// getFilteredZoneIDs returns zone IDs to process. If a domain filter is configured,
+// it returns only those zones directly (skipping the expensive GetZones listing).
+// Otherwise, it falls back to listing all zones.
+func (p *AbionProvider) getFilteredZoneIDs(ctx context.Context) ([]string, error) {
+	if len(p.zoneFilter) > 0 {
+		log.Debugf("Using domain filter, fetching only zones: %v", p.zoneFilter)
+		return p.zoneFilter, nil
+	}
+
+	var zoneIDs []string
 	offset := 0
 	for {
 		page := &internal.Pagination{
@@ -46,36 +93,16 @@ func (p *AbionProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 		}
 
 		for _, zoneData := range zonesResponse.Data {
-			zone, err := p.Client.GetZone(ctx, zoneData.ID)
-			if err != nil {
-				return nil, err
-			}
-
-			for dnsName, record := range zone.Data.Attributes.Records {
-				// recordDetails map[string][]internal.Record
-				for recordType, recordDetails := range record {
-					// recordType string A, AAAA, CAA, CNAME, DNAME, LOC, MX, NAPTR, NS, PTR, RP, SRV, SSHFP, TLSA, TXT
-					// recordDetails []Record
-					for _, recordDetail := range recordDetails {
-						ep := endpoint.NewEndpointWithTTL(p.getExternalDnsDnsName(dnsName, zoneData.ID), recordType, endpoint.TTL(recordDetail.TTL), recordDetail.Data)
-						endpoints = append(endpoints, ep)
-					}
-				}
-			}
+			zoneIDs = append(zoneIDs, zoneData.ID)
 		}
 
 		offset = page.Offset + len(zonesResponse.Data)
-
 		if offset >= zonesResponse.Meta.Total {
 			break
 		}
 	}
 
-	log.WithFields(log.Fields{
-		"endpoints": endpoints,
-	}).Debug("Records")
-
-	return endpoints, nil
+	return zoneIDs, nil
 }
 
 func (p *AbionProvider) endpointsByZone(zoneNameIDMapper provider.ZoneIDName, endpoints []*endpoint.Endpoint) map[string][]*endpoint.Endpoint {
@@ -120,29 +147,13 @@ func (p *AbionProvider) ApplyChanges(ctx context.Context, changes *plan.Changes)
 }
 
 func (p *AbionProvider) populateZoneIdMapper(ctx context.Context) (provider.ZoneIDName, error) {
-	var zoneIds []string
-	offset := 0
-	for {
-		page := &internal.Pagination{
-			Offset: offset,
-		}
-		zonesResponse, err := p.Client.GetZones(ctx, page)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, data := range zonesResponse.Data {
-			zoneIds = append(zoneIds, data.ID)
-		}
-		offset = page.Offset + len(zonesResponse.Data)
-		if offset >= zonesResponse.Meta.Total {
-			break
-		}
+	zoneIDs, err := p.getFilteredZoneIDs(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	// populate zoneIDMapper
 	zoneNameIDMapper := provider.ZoneIDName{}
-	for _, zoneId := range zoneIds {
+	for _, zoneId := range zoneIDs {
 		zoneNameIDMapper.Add(zoneId, zoneId)
 	}
 	return zoneNameIDMapper, nil
