@@ -23,7 +23,7 @@ type AbionProvider struct {
 }
 
 func NewAbionProvider(config *configuration.Configuration) (*AbionProvider, error) {
-	client := *internal.NewAbionClient(config.ApiKey)
+	client := *internal.NewAbionClientWithTimeout(config.ApiKey, config.ApiTimeout)
 	p := &AbionProvider{
 		Client:       &client,
 		DryRun:       config.DryRun,

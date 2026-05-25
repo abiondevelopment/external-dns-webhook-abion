@@ -18,6 +18,7 @@ type Configuration struct {
 	ServerPort         int           `env:"SERVER_PORT" envDefault:"8888"`
 	ServerReadTimeout  time.Duration `env:"SERVER_READ_TIMEOUT" envDefault:"0"`
 	ServerWriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT" envDefault:"0"`
+	ApiTimeout         time.Duration `env:"ABION_API_TIMEOUT" envDefault:"30s"`
 }
 
 // Init sets up configuration by reading environmental variables

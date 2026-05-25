@@ -32,14 +32,20 @@ type ApiClient interface {
 	PatchZone(ctx context.Context, name string, patch ZoneRequest) (*APIResponse[*Zone], error)
 }
 
-// NewAbionClient Creates a new Client.
+// NewAbionClient Creates a new Client with the default HTTP timeout (30s).
 func NewAbionClient(apiKey string) *Client {
+	return NewAbionClientWithTimeout(apiKey, 30*time.Second)
+}
+
+// NewAbionClientWithTimeout creates a new Client with a configurable HTTP
+// timeout for calls to the Abion API. A zero or negative timeout disables it.
+func NewAbionClientWithTimeout(apiKey string, timeout time.Duration) *Client {
 	baseURL, _ := url.Parse(defaultBaseURL)
 
 	return &Client{
 		apiKey:     apiKey,
 		baseURL:    baseURL,
-		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		HTTPClient: &http.Client{Timeout: timeout},
 	}
 }
 

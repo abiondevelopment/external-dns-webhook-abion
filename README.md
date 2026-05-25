@@ -40,6 +40,7 @@ The following environment variables are available for Abion External DNS Webhook
 | SERVER_PORT          | Webhook port.                                                                                                                                  | Default: `8888`      |
 | SERVER_READ_TIMEOUT  | Webhook ReadTimeout is the maximum duration for reading the entire request. A zero or negative value means there will be no timeout.           | Default: 0           |
 | SERVER_WRITE_TIMEOUT | Webhook WriteTimeout is the maximum duration before timing out writes of the response. A zero or negative value means there will be no timeout | Default: 0           |
+| ABION_API_TIMEOUT    | HTTP client timeout for calls from the webhook to the Abion API (e.g. `30s`, `1m`). A zero or negative value disables the timeout.                | Default: `30s`       |
 
 
 # Test external-dns-webhook-abion in Minikube
