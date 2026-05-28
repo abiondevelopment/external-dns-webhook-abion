@@ -24,11 +24,19 @@ type AbionProvider struct {
 
 func NewAbionProvider(config *configuration.Configuration) (*AbionProvider, error) {
 	client := *internal.NewAbionClientWithTimeout(config.ApiKey, config.ApiTimeout)
+
+	trimmedDomains := make([]string, 0, len(config.DomainFilter))
+	for _, d := range config.DomainFilter {
+		if trimmed := strings.TrimSpace(d); trimmed != "" {
+			trimmedDomains = append(trimmedDomains, trimmed)
+		}
+	}
+
 	p := &AbionProvider{
 		Client:       &client,
 		DryRun:       config.DryRun,
-		domainFilter: endpoint.NewDomainFilter(config.DomainFilter),
-		zoneFilter:   config.DomainFilter,
+		domainFilter: endpoint.NewDomainFilter(trimmedDomains),
+		zoneFilter:   trimmedDomains,
 	}
 
 	return p, nil
@@ -72,14 +80,36 @@ func (p *AbionProvider) Records(ctx context.Context) ([]*endpoint.Endpoint, erro
 }
 
 // getFilteredZoneIDs returns zone IDs to process. If a domain filter is configured,
-// it returns only those zones directly (skipping the expensive GetZones listing).
-// Otherwise, it falls back to listing all zones.
+// it returns only those zones directly (skipping the expensive GetZones listing)
+// unless the filter contains wildcard patterns, in which case all zones are fetched
+// and matched against the patterns. Otherwise, it falls back to listing all zones.
 func (p *AbionProvider) getFilteredZoneIDs(ctx context.Context) ([]string, error) {
 	if len(p.zoneFilter) > 0 {
-		log.Debugf("Using domain filter, fetching only zones: %v", p.zoneFilter)
-		return p.zoneFilter, nil
+		if !p.hasWildcardFilter() {
+			log.Debugf("Using domain filter, fetching only zones: %v", p.zoneFilter)
+			return p.zoneFilter, nil
+		}
+
+		log.Debugf("Wildcard detected in domain filter, fetching all zones and matching against: %v", p.zoneFilter)
+		allZones, err := p.fetchAllZoneIDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		var matched []string
+		for _, zone := range allZones {
+			if p.matchesZoneFilter(zone) {
+				matched = append(matched, zone)
+			}
+		}
+		log.Debugf("Wildcard filter matched zones: %v", matched)
+		return matched, nil
 	}
 
+	return p.fetchAllZoneIDs(ctx)
+}
+
+func (p *AbionProvider) fetchAllZoneIDs(ctx context.Context) ([]string, error) {
 	var zoneIDs []string
 	offset := 0
 	for {
@@ -103,6 +133,39 @@ func (p *AbionProvider) getFilteredZoneIDs(ctx context.Context) ([]string, error
 	}
 
 	return zoneIDs, nil
+}
+
+// hasWildcardFilter returns true if any entry in the zone filter contains a wildcard.
+func (p *AbionProvider) hasWildcardFilter() bool {
+	for _, f := range p.zoneFilter {
+		if strings.Contains(f, "*") {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesZoneFilter checks if a zone matches any of the configured filter entries.
+// Supports exact matches and wildcard patterns where `*.example.com` matches any
+// subdomain of example.com (e.g. sub.example.com, deep.sub.example.com).
+func (p *AbionProvider) matchesZoneFilter(zone string) bool {
+	for _, filter := range p.zoneFilter {
+		if !strings.Contains(filter, "*") {
+			if zone == filter {
+				return true
+			}
+			continue
+		}
+
+		// *.example.com → match zones ending in .example.com
+		if strings.HasPrefix(filter, "*.") {
+			suffix := filter[1:] // ".example.com"
+			if strings.HasSuffix(zone, suffix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *AbionProvider) endpointsByZone(zoneNameIDMapper provider.ZoneIDName, endpoints []*endpoint.Endpoint) map[string][]*endpoint.Endpoint {
@@ -140,7 +203,7 @@ func (p *AbionProvider) ApplyChanges(ctx context.Context, changes *plan.Changes)
 		return err
 	}
 
-	if err := p.processDeleteActions(deletesByDomain); err != nil {
+	if err := p.processDeleteActions(ctx, deletesByDomain); err != nil {
 		return err
 	}
 	return nil
@@ -215,7 +278,7 @@ func (p *AbionProvider) processCreateActions(ctx context.Context, createsByDomai
 			continue
 		}
 
-		err = p.submitPatchZone(zoneId, records)
+		err = p.submitPatchZone(ctx, zoneId, records)
 		if err != nil {
 			return err
 		}
@@ -299,7 +362,7 @@ func (p *AbionProvider) processUpdateActions(ctx context.Context, updatesByDomai
 			continue
 		}
 
-		err = p.submitPatchZone(zoneId, records)
+		err = p.submitPatchZone(ctx, zoneId, records)
 		if err != nil {
 			return err
 		}
@@ -307,10 +370,10 @@ func (p *AbionProvider) processUpdateActions(ctx context.Context, updatesByDomai
 	return nil
 }
 
-func (p *AbionProvider) processDeleteActions(deletesByDomain map[string][]*endpoint.Endpoint) error {
+func (p *AbionProvider) processDeleteActions(ctx context.Context, deletesByDomain map[string][]*endpoint.Endpoint) error {
 	for zoneId, deleteEndpoints := range deletesByDomain {
 
-		currentZone, err := p.Client.GetZone(context.Background(), zoneId)
+		currentZone, err := p.Client.GetZone(ctx, zoneId)
 		if err != nil {
 			log.Warnf("unable to get zone: %s, error: %v", zoneId, err)
 			continue
@@ -353,7 +416,7 @@ func (p *AbionProvider) processDeleteActions(deletesByDomain map[string][]*endpo
 			continue
 		}
 
-		err = p.submitPatchZone(zoneId, records)
+		err = p.submitPatchZone(ctx, zoneId, records)
 		if err != nil {
 			return err
 		}
@@ -361,7 +424,7 @@ func (p *AbionProvider) processDeleteActions(deletesByDomain map[string][]*endpo
 	return nil
 }
 
-func (p *AbionProvider) submitPatchZone(zoneId string, records map[string]map[string][]internal.Record) error {
+func (p *AbionProvider) submitPatchZone(ctx context.Context, zoneId string, records map[string]map[string][]internal.Record) error {
 	patchRequest := internal.ZoneRequest{
 		Data: internal.Zone{
 			Type: "zone",
@@ -372,7 +435,7 @@ func (p *AbionProvider) submitPatchZone(zoneId string, records map[string]map[st
 		},
 	}
 
-	_, err := p.Client.PatchZone(context.Background(), zoneId, patchRequest)
+	_, err := p.Client.PatchZone(ctx, zoneId, patchRequest)
 	if err != nil {
 		return fmt.Errorf("error updating zone %w", err)
 	}

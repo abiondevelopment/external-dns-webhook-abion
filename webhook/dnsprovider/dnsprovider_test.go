@@ -793,7 +793,7 @@ func Test_processDeleteActions(t *testing.T) {
 	}
 
 	run := func(t *testing.T, tc testCase) {
-		err := tc.provider.processDeleteActions(tc.deletesByDomain)
+		err := tc.provider.processDeleteActions(context.Background(), tc.deletesByDomain)
 		checkError(t, err, tc.expected.err)
 	}
 

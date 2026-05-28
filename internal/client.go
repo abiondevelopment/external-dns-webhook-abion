@@ -32,9 +32,9 @@ type ApiClient interface {
 	PatchZone(ctx context.Context, name string, patch ZoneRequest) (*APIResponse[*Zone], error)
 }
 
-// NewAbionClient Creates a new Client with the default HTTP timeout (30s).
+// NewAbionClient Creates a new Client with the default HTTP timeout (5s).
 func NewAbionClient(apiKey string) *Client {
-	return NewAbionClientWithTimeout(apiKey, 30*time.Second)
+	return NewAbionClientWithTimeout(apiKey, 5*time.Second)
 }
 
 // NewAbionClientWithTimeout creates a new Client with a configurable HTTP
@@ -145,23 +145,25 @@ func (c *Client) do(req *http.Request, result any) error {
 }
 
 func newJSONRequest(ctx context.Context, method string, endpoint *url.URL, payload any) (*http.Request, error) {
-	buf := new(bytes.Buffer)
+	var body io.Reader
 
-	if payload != nil {
+	if payload != nil && payload != http.NoBody {
+		buf := new(bytes.Buffer)
 		err := json.NewEncoder(buf).Encode(payload)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request JSON body: %w", err)
 		}
+		body = buf
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), buf)
+	req, err := http.NewRequestWithContext(ctx, method, endpoint.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create request: %w", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
 
-	if payload != nil {
+	if payload != nil && payload != http.NoBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
@@ -174,8 +176,11 @@ func parseError(req *http.Request, resp *http.Response) error {
 	zResp := &APIResponse[any]{}
 	err := json.Unmarshal(raw, zResp)
 	if err != nil {
-		log.Errorf("error parsing error %s", err)
-		return err
+		return fmt.Errorf("error parsing error response (status %d): %w", resp.StatusCode, err)
+	}
+
+	if zResp.Error == nil {
+		return fmt.Errorf("unexpected API error (status %d): %s", resp.StatusCode, string(raw))
 	}
 
 	return zResp.Error
