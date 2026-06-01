@@ -26,16 +26,22 @@ func NewAbionProvider(config *configuration.Configuration) (*AbionProvider, erro
 	client := *internal.NewAbionClientWithTimeout(config.ApiKey, config.ApiTimeout)
 
 	trimmedDomains := make([]string, 0, len(config.DomainFilter))
+	externalDNSDomains := make([]string, 0, len(config.DomainFilter))
 	for _, d := range config.DomainFilter {
 		if trimmed := strings.TrimSpace(d); trimmed != "" {
 			trimmedDomains = append(trimmedDomains, trimmed)
+			if strings.HasPrefix(trimmed, "*.") {
+				externalDNSDomains = append(externalDNSDomains, trimmed[1:])
+				continue
+			}
+			externalDNSDomains = append(externalDNSDomains, trimmed)
 		}
 	}
 
 	p := &AbionProvider{
 		Client:       &client,
 		DryRun:       config.DryRun,
-		domainFilter: endpoint.NewDomainFilter(trimmedDomains),
+		domainFilter: endpoint.NewDomainFilter(externalDNSDomains),
 		zoneFilter:   trimmedDomains,
 	}
 
