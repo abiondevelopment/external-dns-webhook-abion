@@ -24,6 +24,7 @@ const (
 	logFieldRequestPath    = "requestPath"
 	logFieldRequestMethod  = "requestMethod"
 	logFieldError          = "error"
+	maxRequestBodySize     = 10 << 20 // 10 MB
 )
 
 var mediaTypeVersion1 = mediaTypeVersion("1")
@@ -160,7 +161,7 @@ func (p *Webhook) ApplyChanges(w http.ResponseWriter, r *http.Request) {
 	}
 	var changes plan.Changes
 	ctx := r.Context()
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&changes); err != nil {
 		w.Header().Set(contentTypeHeader, contentTypePlaintext)
 		w.WriteHeader(http.StatusBadRequest)
@@ -193,7 +194,7 @@ func (p *Webhook) AdjustEndpoints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var pve []*endpoint.Endpoint
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB limit
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	if err := json.NewDecoder(r.Body).Decode(&pve); err != nil {
 		w.Header().Set(contentTypeHeader, contentTypePlaintext)
 		w.WriteHeader(http.StatusBadRequest)
