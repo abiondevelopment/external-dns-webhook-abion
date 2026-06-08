@@ -5,7 +5,7 @@ ARCH ?= $(shell $(GO) env GOARCH)
 
 ARTIFACT_NAME := external-dns-webhook-abion
 IMAGE_NAME := "abiondevelopment/external-dns-webhook-abion"
-IMAGE_TAG := "1.0.1"
+IMAGE_TAG := "1.0.2"
 
 OUT := $(shell pwd)/_out
 

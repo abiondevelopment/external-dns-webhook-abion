@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/abiondevelopment/external-dns-webhook-abion/internal"
+	"github.com/abiondevelopment/external-dns-webhook-abion/webhook/configuration"
 	"github.com/stretchr/testify/assert"
 	"sigs.k8s.io/external-dns/endpoint"
 	"sigs.k8s.io/external-dns/provider"
@@ -793,7 +794,7 @@ func Test_processDeleteActions(t *testing.T) {
 	}
 
 	run := func(t *testing.T, tc testCase) {
-		err := tc.provider.processDeleteActions(tc.deletesByDomain)
+		err := tc.provider.processDeleteActions(context.Background(), tc.deletesByDomain)
 		checkError(t, err, tc.expected.err)
 	}
 
@@ -1064,6 +1065,191 @@ func Test_getAbionDnsName(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			run(t, tc)
+		})
+	}
+}
+
+func Test_NewAbionProvider_DomainFilterSplitting(t *testing.T) {
+	type testCase struct {
+		name                   string
+		domainFilter           []string
+		expectedZoneFilter     []string
+		expectedDomainIncludes []string
+		expectedDomainExcludes []string
+	}
+
+	testCases := []testCase{
+		{
+			name:                   "plain domains passed through unchanged",
+			domainFilter:           []string{"example.com", "other.com"},
+			expectedZoneFilter:     []string{"example.com", "other.com"},
+			expectedDomainIncludes: []string{"example.com", "other.com"},
+			expectedDomainExcludes: []string{},
+		},
+		{
+			name:                   "wildcard converted to suffix for domainFilter",
+			domainFilter:           []string{"*.example.com"},
+			expectedZoneFilter:     []string{"*.example.com"},
+			expectedDomainIncludes: []string{"sub.example.com", "deep.sub.example.com"},
+			expectedDomainExcludes: []string{"example.com", "other.com"},
+		},
+		{
+			name:                   "mixed plain and wildcard",
+			domainFilter:           []string{"exact.com", "*.wild.com"},
+			expectedZoneFilter:     []string{"exact.com", "*.wild.com"},
+			expectedDomainIncludes: []string{"exact.com", "sub.wild.com"},
+			expectedDomainExcludes: []string{"wild.com", "other.com"},
+		},
+		{
+			name:                   "whitespace trimmed and empty entries skipped",
+			domainFilter:           []string{"  example.com  ", "", "  "},
+			expectedZoneFilter:     []string{"example.com"},
+			expectedDomainIncludes: []string{"example.com"},
+			expectedDomainExcludes: []string{},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &configuration.Configuration{
+				ApiKey:       "test-key",
+				DomainFilter: tc.domainFilter,
+			}
+			p, err := NewAbionProvider(config)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expectedZoneFilter, p.zoneFilter)
+
+			for _, domain := range tc.expectedDomainIncludes {
+				assert.True(t, p.domainFilter.Match(domain), "domainFilter should match %s", domain)
+			}
+			for _, domain := range tc.expectedDomainExcludes {
+				assert.False(t, p.domainFilter.Match(domain), "domainFilter should not match %s", domain)
+			}
+		})
+	}
+}
+
+func Test_hasWildcardFilter(t *testing.T) {
+	tests := []struct {
+		name       string
+		zoneFilter []string
+		expected   bool
+	}{
+		{"no wildcard", []string{"example.com", "other.com"}, false},
+		{"has wildcard", []string{"example.com", "*.wild.com"}, true},
+		{"only wildcard", []string{"*.example.com"}, true},
+		{"empty filter", []string{}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &AbionProvider{zoneFilter: tc.zoneFilter}
+			assert.Equal(t, tc.expected, p.hasWildcardFilter())
+		})
+	}
+}
+
+func Test_matchesZoneFilter(t *testing.T) {
+	tests := []struct {
+		name       string
+		zoneFilter []string
+		zone       string
+		expected   bool
+	}{
+		{"exact match", []string{"example.com"}, "example.com", true},
+		{"no match", []string{"example.com"}, "other.com", false},
+		{"wildcard matches subdomain", []string{"*.example.com"}, "sub.example.com", true},
+		{"wildcard matches deep subdomain", []string{"*.example.com"}, "deep.sub.example.com", true},
+		{"wildcard does not match root", []string{"*.example.com"}, "example.com", false},
+		{"mixed filter exact match", []string{"exact.com", "*.wild.com"}, "exact.com", true},
+		{"mixed filter wildcard match", []string{"exact.com", "*.wild.com"}, "sub.wild.com", true},
+		{"mixed filter no match", []string{"exact.com", "*.wild.com"}, "other.com", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &AbionProvider{zoneFilter: tc.zoneFilter}
+			assert.Equal(t, tc.expected, p.matchesZoneFilter(tc.zone))
+		})
+	}
+}
+
+func Test_getFilteredZoneIDs(t *testing.T) {
+	type testCase struct {
+		name     string
+		provider AbionProvider
+		expected struct {
+			zoneIDs []string
+			err     bool
+		}
+	}
+
+	testCases := []testCase{
+		{
+			name: "no filter returns all zones",
+			provider: AbionProvider{
+				Client: &mockClient{
+					getZones: zonesResponse{
+						APIResponse: &internal.APIResponse[[]internal.Zone]{
+							Meta: &internal.Metadata{
+								Pagination: &internal.Pagination{Offset: 0, Limit: 2, Total: 2},
+							},
+							Data: []internal.Zone{
+								{ID: "a.com"}, {ID: "b.com"},
+							},
+						},
+					},
+				},
+			},
+			expected: struct {
+				zoneIDs []string
+				err     bool
+			}{zoneIDs: []string{"a.com", "b.com"}},
+		},
+		{
+			name: "plain filter returns filter directly without API call",
+			provider: AbionProvider{
+				zoneFilter: []string{"specific.com"},
+				Client:     &mockClient{}, // no getZones configured - would panic if called incorrectly
+			},
+			expected: struct {
+				zoneIDs []string
+				err     bool
+			}{zoneIDs: []string{"specific.com"}},
+		},
+		{
+			name: "wildcard filter fetches all zones and matches",
+			provider: AbionProvider{
+				zoneFilter: []string{"*.example.com"},
+				Client: &mockClient{
+					getZones: zonesResponse{
+						APIResponse: &internal.APIResponse[[]internal.Zone]{
+							Meta: &internal.Metadata{
+								Pagination: &internal.Pagination{Offset: 0, Limit: 3, Total: 3},
+							},
+							Data: []internal.Zone{
+								{ID: "sub.example.com"},
+								{ID: "other.com"},
+								{ID: "deep.sub.example.com"},
+							},
+						},
+					},
+				},
+			},
+			expected: struct {
+				zoneIDs []string
+				err     bool
+			}{zoneIDs: []string{"sub.example.com", "deep.sub.example.com"}},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := tc.provider.getFilteredZoneIDs(context.Background())
+			checkError(t, err, tc.expected.err)
+			if err == nil {
+				assert.Equal(t, tc.expected.zoneIDs, actual)
+			}
 		})
 	}
 }

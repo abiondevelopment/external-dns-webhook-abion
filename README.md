@@ -32,6 +32,7 @@ The following environment variables are available for Abion External DNS Webhook
 | Variable             | Description                                                                                                                                    | Notes                |
 |----------------------|------------------------------------------------------------------------------------------------------------------------------------------------|----------------------|
 | ABION_API_KEY        | ABION API key. You *must* have an Abion account to retrieve an API key. Contact [Abion] for help how to create an account and API key.         | Mandatory            |
+| DOMAIN_FILTER        | Comma-separated list of zones to manage (e.g. `example.com,other.com`). Supports exact zone names and wildcard patterns (`*.example.com` matches any subdomain such as `sub.example.com` or `deep.sub.example.com`, but not `example.com` itself). Exact entries use a fast path that skips listing all zones; wildcard entries require fetching all zones to match against. If unset, all accessible zones are fetched. | Default: (empty)     |
 | DRY_RUN              | If set, changes won't be applied.                                                                                                              | Default: `false`     | 
 | ABION_DEBUG          | Enables webhook debug messages.                                                                                                                | Default: `false`     |  
 | LOG_FORMAT           | Specifies log format for webhook. Supported values are `text` or `json`                                                                        | Default: `text`      |  
@@ -39,6 +40,7 @@ The following environment variables are available for Abion External DNS Webhook
 | SERVER_PORT          | Webhook port.                                                                                                                                  | Default: `8888`      |
 | SERVER_READ_TIMEOUT  | Webhook ReadTimeout is the maximum duration for reading the entire request. A zero or negative value means there will be no timeout.           | Default: 0           |
 | SERVER_WRITE_TIMEOUT | Webhook WriteTimeout is the maximum duration before timing out writes of the response. A zero or negative value means there will be no timeout | Default: 0           |
+| ABION_API_TIMEOUT    | HTTP client timeout for calls from the webhook to the Abion API (e.g. `30s`, `1m`). A zero or negative value disables the timeout.                | Default: `5s`       |
 
 
 # Test external-dns-webhook-abion in Minikube

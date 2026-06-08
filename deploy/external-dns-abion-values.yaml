@@ -13,6 +13,9 @@ provider:
             key: api-key
       - name: SERVER_HOST
         value: 0.0.0.0
+      # Restrict to specific zones for faster startup (recommended)
+      - name: DOMAIN_FILTER
+        value: "example.com"
 #      - name: ABION_DEBUG
 #        value: "true"
 
