@@ -12,6 +12,18 @@ Contact [Abion] for help how to create an account and API key
 # Docker images
 Prebuilt docker images can be found on [Docker Hub]
 
+# Release Docker images with GitHub Actions
+
+The repository includes a GitHub Actions workflow at [.github/workflows/release-dockerhub.yml](.github/workflows/release-dockerhub.yml).
+It publishes the Docker image to [Docker Hub] when a release tag is pushed, for example `1.0.3`.
+The workflow only accepts tags matching `X.Y.Z`.
+
+The pushed Docker tag is the Git tag name. For a tag such as `1.0.3`, the workflow pushes:
+
+- `abiondevelopment/external-dns-webhook-abion:1.0.3`
+
+For local builds without an explicit tag override, the `Makefile` default is `dev`.
+
 # Install external-dns-webhook-abion using Helm
 Install external-dns and external-dns-webhook-abion using helm by following the guide below. The Helm cart values for 
 external-dns-webhook-abion can be found [here](deploy/external-dns-abion-values.yaml). For additional configurable helm chart values,
@@ -83,4 +95,3 @@ The following environment variables are available for Abion External DNS Webhook
 [Docker Hub]: https://hub.docker.com/r/abiondevelopment/external-dns-webhook-abion
 [ExternalDNS]: https://github.com/kubernetes-sigs/external-dns
 [kubernetes-sigs helm chart]: https://github.com/kubernetes-sigs/external-dns/blob/master/charts/external-dns/README.md#values
-
