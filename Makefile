@@ -4,8 +4,10 @@ OS ?= $(shell $(GO) env GOOS)
 ARCH ?= $(shell $(GO) env GOARCH)
 
 ARTIFACT_NAME := external-dns-webhook-abion
-IMAGE_NAME := "abiondevelopment/external-dns-webhook-abion"
-IMAGE_TAG := "1.0.2"
+IMAGE_NAME ?= abiondevelopment/external-dns-webhook-abion
+IMAGE_TAG ?= dev
+GOFUMPT_VERSION ?= v0.10.0
+GOLANGCI_LINT_VERSION ?= v1.64.8
 
 OUT := $(shell pwd)/_out
 
@@ -29,7 +31,7 @@ show: ## Show variables
 
 .PHONY: fmt
 fmt: ## Run gofumpt against code.
-	go run mvdan.cc/gofumpt -w .
+	go run mvdan.cc/gofumpt@$(GOFUMPT_VERSION) -w .
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -37,7 +39,7 @@ vet: ## Run go vet against code.
 
 .PHONY: lint
 lint: ## Run golangci-lint against code.
-	go run github.com/golangci/golangci-lint/cmd/golangci-lint run --timeout 2m
+	go run github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run --timeout 2m
 
 .PHONY: static-analysis
 static-analysis: lint vet ## Run static analysis against code.
